@@ -3,7 +3,9 @@ CloudOps AI Agent - Master FastAPI Application
 Provides RESTful APIs, SSE event streams, and agent swarm coordination.
 """
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 import time
@@ -46,8 +48,14 @@ class RemediationApprovalRequest(BaseModel):
     override_command: Optional[str] = None
     operator_notes: Optional[str] = "Approved by SRE on-call engineer"
 
+dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+assets_dir = os.path.join(dist_dir, "assets")
+
 @app.get("/")
 def root():
+    index_file = os.path.join(dist_dir, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
     return {
         "service": settings.APP_NAME,
         "version": settings.VERSION,
@@ -179,10 +187,10 @@ def get_postmortem(incident_id: str):
         "postmortem": incident["postmortem"]
     }
 
-# Mount frontend production build if available
-dist_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+# Mount frontend assets and dashboard if built
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 if os.path.exists(dist_dir):
-    from fastapi.staticfiles import StaticFiles
     app.mount("/dashboard", StaticFiles(directory=dist_dir, html=True), name="frontend")
 
 if __name__ == "__main__":
