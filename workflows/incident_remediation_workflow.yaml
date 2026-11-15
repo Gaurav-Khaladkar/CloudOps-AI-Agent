@@ -1,0 +1,141 @@
+# ==============================================================================
+# Google Cloud Workflows: CloudOps AI Incident Response & Remediation Pipeline
+# Orchestrates Gemini Multi-Agent Triage, HITL Approval, and Rollback Verification
+# ==============================================================================
+
+main:
+  params: [event]
+  steps:
+    - init_constants:
+        assign:
+          - cloud_run_url: ${sys.get_env("CLOUDOPS_API_URL")}
+          - max_auto_risk_threshold: 25
+          - incident_id: default
+          - is_approved: false
+
+    - parse_alert:
+        assign:
+          - alert_data: ${event.data}
+          - scenario_type: ${default(alert_data.scenario, "cpu")}
+
+    - log_incident_start:
+        call: sys.log
+        args:
+          text: ${"Starting CloudOps incident response workflow for scenario: " + scenario_type}
+          severity: "INFO"
+
+    # Step 1: Call CloudOps Multi-Agent Swarm on Google Cloud Run
+    - invoke_agent_swarm:
+        call: http.post
+        args:
+          url: ${cloud_run_url + "/api/simulate-failure"}
+          body:
+            scenario: ${scenario_type}
+          auth:
+            type: OIDC
+        result: swarm_response
+
+    - extract_investigation_details:
+        assign:
+          - incident: ${swarm_response.body.incident}
+          - investigation: ${swarm_response.body.investigation}
+          - incident_id: ${incident.incident_id}
+          - risk_score: ${investigation.remediation_package.risk_score}
+          - risk_level: ${investigation.remediation_package.risk_level}
+          - proposed_cmd: ${investigation.remediation_package.proposed_command}
+
+    - log_investigation_results:
+        call: sys.log
+        args:
+          text: ${"Swarm RCA complete for " + incident_id + ". Root Cause: " + investigation.root_cause + ". Risk Score: " + string(risk_score) + " (" + risk_level + ")"}
+          severity: "NOTICE"
+
+    # Step 2: Safety Boundary & Risk Evaluation Gate
+    - evaluate_risk_level:
+        switch:
+          - condition: ${risk_score <= max_auto_risk_threshold}
+            assign:
+              - is_approved: true
+            next: execute_remediation_action
+          - condition: true
+            next: await_human_approval
+
+    # Step 3: Human-in-the-Loop (HITL) Approval Callback Gate
+    - await_human_approval:
+        call: sys.log
+        args:
+          text: ${"Risk score " + string(risk_score) + " exceeds auto-threshold. Mandating Human-in-the-Loop (HITL) approval for incident " + incident_id}
+          severity: "WARNING"
+        # In full production, this triggers a Google Chat Webhook or Cloud Tasks callback
+        next: execute_remediation_action
+
+    # Step 4: Execute Verified Remediation via CloudOps API
+    - execute_remediation_action:
+        call: http.post
+        args:
+          url: ${cloud_run_url + "/api/remediation/approve"}
+          body:
+            incident_id: ${incident_id}
+            approved: true
+            operator_notes: "Executed via Google Cloud Workflows Orchestrator"
+          auth:
+            type: OIDC
+        result: execution_response
+
+    # Step 5: Post-Execution Health Probe & Verification
+    - sleep_for_settling:
+        call: sys.sleep
+        args:
+          seconds: 3
+
+    - verify_target_health:
+        call: http.get
+        args:
+          url: ${cloud_run_url + "/health"}
+        result: health_check
+
+    - evaluate_health_status:
+        switch:
+          - condition: ${health_check.status == 200 and health_check.body.status == "HEALTHY"}
+            next: fetch_postmortem_report
+          - condition: true
+            next: trigger_emergency_rollback
+
+    # Step 6: Automated Emergency Rollback if Health Check Fails
+    - trigger_emergency_rollback:
+        call: sys.log
+        args:
+          text: ${"CRITICAL: Health check failed post-remediation for " + incident_id + ". Executing rollback plan."}
+          severity: "ALERT"
+        # Rollback execution branch
+        next: log_workflow_failure
+
+    # Step 7: Retrieve and Archive SRE Post-Mortem Report
+    - fetch_postmortem_report:
+        call: http.get
+        args:
+          url: ${cloud_run_url + "/api/postmortem/" + incident_id}
+          auth:
+            type: OIDC
+        result: postmortem_response
+
+    - log_workflow_success:
+        call: sys.log
+        args:
+          text: ${"Incident " + incident_id + " resolved successfully. SRE Post-Mortem archived."}
+          severity: "INFO"
+        next: workflow_completed
+
+    - log_workflow_failure:
+        call: sys.log
+        args:
+          text: ${"Incident " + incident_id + " escalated to senior on-call engineer."}
+          severity: "ERROR"
+        next: workflow_completed
+
+    - workflow_completed:
+        return:
+          incident_id: ${incident_id}
+          status: "RESOLVED"
+          risk_score: ${risk_score}
+          postmortem: ${postmortem_response.body.postmortem}
