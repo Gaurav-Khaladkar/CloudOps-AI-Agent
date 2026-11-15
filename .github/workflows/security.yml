@@ -1,0 +1,32 @@
+name: CloudOps Security & Vulnerability Scan
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 4 * * 1'
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Bandit & Pip-Audit
+        run: |
+          pip install bandit pip-audit
+
+      - name: Static Security Analysis (Bandit)
+        run: |
+          bandit -r backend/ -ll -x tests/
+
+      - name: Dependency Vulnerability Audit
+        run: |
+          pip-audit -r requirements.txt || true
