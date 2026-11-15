@@ -101,9 +101,36 @@ Benchmark Metrics:
 
 ---
 
-## 5. Dual-Cloud Production Infrastructure
+## 6. Google Cloud Workflows SRE Incident Pipeline
 
-- **Compute Runtime:** Google Cloud Run (Fully serverless, autoscaling 1 to 10 instances, containerized via Docker).
-- **Secrets Management:** Google Cloud Secret Manager (Zero hardcoded credentials).
-- **Incident Messaging:** AWS SNS Topic subscribed to CloudWatch Composite Alarms.
-- **Infrastructure as Code (IaC):** Modular Terraform (`terraform/gcp/` and `terraform/aws/`).
+The platform integrates enterprise-grade **Google Cloud Workflows** (`workflows/incident_remediation_workflow.yaml`) to automate the end-to-end incident lifecycle without manual human polling:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Alert as Cloud Monitoring / AWS SNS
+    participant GCW as Google Cloud Workflows
+    participant Engine as CloudOps API (Cloud Run)
+    participant SRE as On-Call SRE (HITL Gate)
+    participant Host as Target Host (EC2 / GCE)
+
+    Alert->>GCW: Trigger incident workflow execution
+    GCW->>Engine: POST /api/simulate-failure (Invoke Agent Swarm)
+    Engine-->>GCW: Return Root Cause & Blast Radius Risk Score
+    alt Risk Score <= 25 (Low Risk)
+        GCW->>Engine: Auto-approve remediation
+    else Risk Score > 25 (Medium/High Risk)
+        GCW->>SRE: Send approval notification (Web/Chat Webhook)
+        SRE-->>GCW: SRE approves execution via UI
+    end
+    GCW->>Engine: POST /api/remediation/approve
+    Engine->>Host: Execute safe command via SSM / SSH
+    Host-->>Engine: Exit Code 0
+    GCW->>Engine: GET /health (Post-verification probe)
+    alt Health Check Healthy
+        GCW->>Engine: GET /api/postmortem/{id}
+        GCW->>GCW: Archive Post-Mortem in Cloud Logging & BigQuery
+    else Health Check Failed
+        GCW->>Host: Execute Automated Rollback Script
+    end
+```
