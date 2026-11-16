@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
-
-const SCENARIOS = [
-  { id: 'cpu', label: '1. CPU Runaway Spike', icon: '⚡', desc: 'Deadlock socket loop in worker-service' },
-  { id: 'oom', label: '2. Redis OOM Killer', icon: '💥', desc: 'Cache memory exhaustion at 95.8%' },
-  { id: 'disk', label: '3. Root Disk Full', icon: '💾', desc: 'Unrotated nginx debug log at 98.4%' },
-  { id: 'service', label: '4. Database Crash', icon: '🔌', desc: 'PostgreSQL stale postmaster.pid lock' }
-];
+import Sidebar from './components/Sidebar';
+import Header from './components/Header';
+import Overview from './pages/Overview';
+import Fleet from './pages/Fleet';
+import Telemetry from './pages/Telemetry';
+import AgentSwarm from './pages/AgentSwarm';
+import Incidents from './pages/Incidents';
+import Copilot from './pages/Copilot';
+import KnowledgeBase from './pages/KnowledgeBase';
+import Remediation from './pages/Remediation';
+import Reports from './pages/Reports';
+import Settings from './pages/Settings';
 
 const DEFAULT_INCIDENTS = {
   cpu: {
@@ -75,25 +80,20 @@ const DEFAULT_INCIDENTS = {
 };
 
 export default function App() {
-  const [activeScenario, setActiveScenario] = useState('cpu');
+  const [activeTab, setActiveTab] = useState('overview');
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [incidentData, setIncidentData] = useState(DEFAULT_INCIDENTS.cpu);
   const [agentLogs, setAgentLogs] = useState([]);
   const [isRemediating, setIsRemediating] = useState(false);
   const [isResolved, setIsResolved] = useState(false);
-  const [postMortemText, setPostMortemText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
 
-  // Load initial scenario on mount
   useEffect(() => {
     loadScenario('cpu');
   }, []);
 
   const loadScenario = async (scenarioId) => {
-    setActiveScenario(scenarioId);
     setIsResolved(false);
     setIsRemediating(false);
-    setPostMortemText('');
-    setIsLoading(true);
 
     const fallback = DEFAULT_INCIDENTS[scenarioId] || DEFAULT_INCIDENTS.cpu;
 
@@ -127,7 +127,6 @@ export default function App() {
           status: 'AWAITING_APPROVAL'
         });
 
-        // Set live agent trace
         const traces = inv.investigation_trace || [];
         setAgentLogs(traces.map(t => ({
           time: new Date().toLocaleTimeString(),
@@ -137,11 +136,8 @@ export default function App() {
       } else {
         useFallback(fallback);
       }
-    } catch (err) {
-      console.warn('API call failed, using high-fidelity local state:', err);
+    } catch (e) {
       useFallback(fallback);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -161,19 +157,12 @@ export default function App() {
     setIsRemediating(true);
 
     try {
-      const res = await fetch('/api/remediation/approve', {
+      await fetch('/api/remediation/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ incident_id: incidentData.id, approved: true })
       });
-
-      if (res.ok) {
-        const result = await res.json();
-        setPostMortemText(result.postmortem_markdown || '');
-      }
-    } catch (e) {
-      console.warn('Approval API fallback:', e);
-    }
+    } catch (e) {}
 
     setTimeout(() => {
       setIsRemediating(false);
@@ -195,264 +184,85 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex font-sans antialiased selection:bg-purple-500/30 selection:text-purple-200">
+      
+      {/* Multi-Page Sticky Sidebar Navigation */}
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        isCollapsed={isCollapsed} 
+        setIsCollapsed={setIsCollapsed} 
+      />
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         
-        {/* Top Header */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-800 gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <span className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg font-bold text-xl">⚡</span>
-              <h1 className="text-2xl font-bold tracking-tight text-white">CloudOps AI Agent</h1>
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20 font-mono">Gemini 2.5 Flash</span>
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20 font-mono">AWS + GCP CloudOps</span>
-            </div>
-            <p className="text-xs text-slate-400 mt-1">Autonomous Site Reliability Engineering & Multi-Agent Incident Triage Platform</p>
-          </div>
-          
-          <div className="flex items-center gap-6">
-            <div className="text-right">
-              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">MTTR Reduction</div>
-              <div className="text-lg font-mono font-bold text-emerald-400">-72.4% <span className="text-xs text-slate-400 font-normal">(48m → 24s)</span></div>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Safety Compliance</div>
-              <div className="text-lg font-mono font-bold text-emerald-400">100.0% <span className="text-xs text-slate-400 font-normal">(0 violations)</span></div>
-            </div>
-          </div>
-        </header>
+        {/* Sticky Header with Chaos Trigger and Cloud Status */}
+        <Header 
+          onTriggerScenario={loadScenario}
+          activeIncident={incidentData}
+          setActiveTab={setActiveTab}
+          isResolved={isResolved}
+        />
 
-        {/* Active Incident Alert Banner */}
-        <div className={`p-4 rounded-xl border transition-all duration-300 ${isResolved ? 'bg-emerald-950/30 border-emerald-500/30' : 'bg-amber-950/20 border-amber-500/30'}`}>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="relative flex h-3 w-3">
-                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isResolved ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
-                <span className={`relative inline-flex rounded-full h-3 w-3 ${isResolved ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-              </div>
-              <div>
-                <div className="text-sm font-semibold flex items-center gap-2">
-                  <span className={isResolved ? 'text-emerald-300' : 'text-amber-300'}>{incidentData.id}: {incidentData.title}</span>
-                  <span className={`px-2 py-0.5 text-xs rounded font-mono ${isResolved ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
-                    {isResolved ? 'RESOLVED' : incidentData.severity}
-                  </span>
-                </div>
-                <div className="text-xs text-slate-400 mt-0.5">Impacted Node: <span className="text-sky-300 font-mono">{incidentData.instance}</span> | Root Cause: {incidentData.rootCause}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-mono text-slate-400">{isResolved ? 'Recovery: 24s (PASSED)' : isLoading ? 'Triaging...' : 'Elapsed: 00:01:42'}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Main Grid: Left Swarm & HITL, Right Telemetry & Scenarios */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-          {/* Left Column (2 cols) */}
-          <div className="lg:col-span-2 space-y-6">
-
-            {/* Multi-Agent Swarm Tracker */}
-            <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-white">Multi-Agent Swarm Execution Trace</h2>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">Google Agent Architecture</span>
-                </div>
-                <span className="text-xs text-emerald-400 font-mono flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 6 Agents Coordinated
-                </span>
-              </div>
-
-              {/* Swarm Agents Mini-Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-center text-xs">
-                <div className="p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/60">
-                  <div className="text-lg">👑</div>
-                  <div className="font-semibold mt-1">Supervisor</div>
-                  <div className="text-[10px] text-purple-400 font-mono">Coordinating</div>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/60">
-                  <div className="text-lg">📈</div>
-                  <div className="font-semibold mt-1">Metrics</div>
-                  <div className="text-[10px] text-sky-400 font-mono">CloudWatch</div>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/60">
-                  <div className="text-lg">📜</div>
-                  <div className="font-semibold mt-1">Linux Diag</div>
-                  <div className="text-[10px] text-amber-400 font-mono">journalctl</div>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/60">
-                  <div className="text-lg">⚡</div>
-                  <div className="font-semibold mt-1">Gemini 2.5</div>
-                  <div className="text-[10px] text-purple-300 font-mono">RCA Engine</div>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/60">
-                  <div className="text-lg">📚</div>
-                  <div className="font-semibold mt-1">RAG SOPs</div>
-                  <div className="text-[10px] text-emerald-400 font-mono">ChromaDB</div>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/60">
-                  <div className="text-lg">🛡️</div>
-                  <div className="font-semibold mt-1">Remediation</div>
-                  <div className="text-[10px] text-rose-400 font-mono">HITL Gate</div>
-                </div>
-              </div>
-
-              {/* Agent Reasoning Stream Terminal */}
-              <div className="bg-black/60 border border-slate-800 rounded-lg p-3.5 font-mono text-xs h-48 overflow-y-auto space-y-1.5">
-                {agentLogs.length === 0 ? (
-                  <div className="text-slate-500">Initializing multi-agent swarm telemetry...</div>
-                ) : (
-                  agentLogs.map((log, index) => (
-                    <div key={index} className="text-slate-300">
-                      <span className="text-slate-500">[{log.time}]</span> <span className="text-sky-400">[{log.agent}]</span> {log.text}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Human-in-the-Loop Approval Gate */}
-            <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-rose-400 uppercase tracking-wide">Human-in-the-Loop Safety Gate</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">Allowlist Verified</span>
-                </div>
-                <div className="text-xs text-slate-400">
-                  Risk Level: <strong className="text-emerald-400 font-mono">{incidentData.riskLevel} ({incidentData.riskScore}/100)</strong>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div className="space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Proposed SRE Remediation Command</div>
-                  <div className="p-2.5 rounded bg-black/60 border border-slate-800 font-mono text-emerald-400 select-all break-all">
-                    {incidentData.remedyCmd}
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Pre-Computed Rollback Safeguard</div>
-                  <div className="p-2.5 rounded bg-black/60 border border-slate-800 font-mono text-amber-300 select-all break-all">
-                    {incidentData.rollbackCmd}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-                <div className="text-xs text-slate-400">
-                  🔒 Sanitizer: Verified zero dangerous wildcards (<code className="text-rose-400 font-mono">rm -rf /</code>, <code className="text-rose-400 font-mono">dd</code>, etc.)
-                </div>
-                <div className="flex items-center gap-3">
-                  <button 
-                    disabled={isResolved || isRemediating}
-                    onClick={handleApprove}
-                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs transition-all shadow-lg shadow-emerald-950/40"
-                  >
-                    {isRemediating ? '⏳ Executing Remediation...' : isResolved ? '✓ Remediation Completed' : '✓ Authorize & Execute'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* SRE Post-Mortem Report Viewer (shows upon resolution) */}
-            {isResolved && (
-              <div className="p-5 rounded-xl bg-slate-900/60 border border-emerald-500/30 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                  <span className="text-xs font-bold text-emerald-300 uppercase tracking-wide">✓ Automated SRE Post-Mortem Generated</span>
-                  <span className="text-[10px] text-slate-400 font-mono">Exit Code: 0</span>
-                </div>
-                <div className="p-3 bg-black/60 rounded border border-slate-800 font-mono text-xs text-slate-300 space-y-1">
-                  <div><strong>Incident:</strong> {incidentData.id} - {incidentData.title}</div>
-                  <div><strong>Root Cause:</strong> {incidentData.rootCause}</div>
-                  <div><strong>Action Executed:</strong> <span className="text-emerald-400">{incidentData.remedyCmd}</span></div>
-                  <div><strong>Verification:</strong> Health probe returned HTTP 200 OK. Metric returned to safe baseline (&lt; 25%).</div>
-                  <div><strong>Recovery Duration:</strong> 24 seconds (vs 48 minutes manual baseline).</div>
-                </div>
-              </div>
+        {/* Dynamic Multi-Page Router Outlet */}
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
+          <div className="max-w-7xl mx-auto">
+            {activeTab === 'overview' && (
+              <Overview 
+                incidentData={incidentData} 
+                isResolved={isResolved} 
+                onTriggerScenario={loadScenario} 
+                setActiveTab={setActiveTab} 
+              />
             )}
-
+            {activeTab === 'fleet' && (
+              <Fleet setActiveTab={setActiveTab} />
+            )}
+            {activeTab === 'telemetry' && (
+              <Telemetry />
+            )}
+            {activeTab === 'swarm' && (
+              <AgentSwarm 
+                agentLogs={agentLogs} 
+                incidentData={incidentData} 
+              />
+            )}
+            {activeTab === 'incidents' && (
+              <Incidents 
+                incidentData={incidentData} 
+                isResolved={isResolved} 
+                setActiveTab={setActiveTab} 
+              />
+            )}
+            {activeTab === 'copilot' && (
+              <Copilot incidentData={incidentData} />
+            )}
+            {activeTab === 'knowledge' && (
+              <KnowledgeBase />
+            )}
+            {activeTab === 'remediation' && (
+              <Remediation 
+                incidentData={incidentData}
+                isRemediating={isRemediating}
+                isResolved={isResolved}
+                onApprove={handleApprove}
+              />
+            )}
+            {activeTab === 'reports' && (
+              <Reports 
+                incidentData={incidentData}
+                isResolved={isResolved}
+              />
+            )}
+            {activeTab === 'settings' && (
+              <Settings />
+            )}
           </div>
-
-          {/* Right Column (1 col) */}
-          <div className="space-y-6">
-
-            {/* Live Metrics Telemetry */}
-            <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                <span className="text-xs font-semibold text-white">Node Telemetry Live</span>
-                <span className="text-[10px] text-sky-400 font-mono">{incidentData.instance}</span>
-              </div>
-
-              {/* CPU Gauge */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-400">CPU Load</span>
-                  <span className={incidentData.cpu > 80 ? 'text-amber-400 font-bold' : 'text-emerald-400'}>{incidentData.cpu}%</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div className={`h-2 rounded-full transition-all duration-700 ${incidentData.cpu > 80 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${incidentData.cpu}%` }}></div>
-                </div>
-              </div>
-
-              {/* RAM Gauge */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-400">RAM (Memory)</span>
-                  <span className={incidentData.mem > 80 ? 'text-rose-400 font-bold' : 'text-sky-400'}>{incidentData.mem}%</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div className={`h-2 rounded-full transition-all duration-700 ${incidentData.mem > 80 ? 'bg-rose-400' : 'bg-sky-400'}`} style={{ width: `${incidentData.mem}%` }}></div>
-                </div>
-              </div>
-
-              {/* Disk Gauge */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-400">Disk (/var)</span>
-                  <span className={incidentData.disk > 80 ? 'text-rose-400 font-bold' : 'text-emerald-400'}>{incidentData.disk}%</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div className={`h-2 rounded-full transition-all duration-700 ${incidentData.disk > 80 ? 'bg-rose-400' : 'bg-emerald-400'}`} style={{ width: `${incidentData.disk}%` }}></div>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-800 grid grid-cols-2 gap-2 text-center text-xs font-mono">
-                <div className="p-2 bg-black/40 rounded border border-slate-800">
-                  <div className="text-[10px] text-slate-400">P99 Latency</div>
-                  <div className="font-bold text-white mt-0.5">{incidentData.p99} ms</div>
-                </div>
-                <div className="p-2 bg-black/40 rounded border border-slate-800">
-                  <div className="text-[10px] text-slate-400">Status</div>
-                  <div className="font-bold text-emerald-400 mt-0.5">{incidentData.status}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Synthetic Chaos Scenario Selector */}
-            <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-              <div className="text-xs font-semibold text-white">Inject Chaos Scenarios</div>
-              <div className="space-y-2">
-                {SCENARIOS.map(sc => (
-                  <button
-                    key={sc.id}
-                    onClick={() => loadScenario(sc.id)}
-                    className={`w-full text-left p-2.5 rounded-lg border transition-all text-xs flex items-center justify-between ${activeScenario === sc.id ? 'bg-purple-950/30 border-purple-500/50 text-purple-200' : 'bg-slate-800/40 border-slate-800 hover:border-slate-700 text-slate-300'}`}
-                  >
-                    <div>
-                      <div className="font-medium">{sc.label}</div>
-                      <div className="text-[10px] text-slate-400">{sc.desc}</div>
-                    </div>
-                    <span>{sc.icon}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-          </div>
-        </div>
+        </main>
 
       </div>
+
     </div>
   );
 }
